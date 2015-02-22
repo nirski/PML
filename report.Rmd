@@ -10,11 +10,11 @@ date: '2015-02-22'
 
 ## Executive Summary
 
-A
+Predictive Machine Learning is employed in this document to guess the type of exercise based on the data collected by accelerometers on the belt, forearm, arm, and dumbell of 6 participants of the experiment. The Random Forest algorithm is applied to a training data set, resulting in a model of high predictive accuracy and low out-of-sample error.
 
 ## 1. Data Set
 
-The data set we are going to use in the analysis (`mtcars`) consists of 32 observations on 11 variables, as explained in [the manual](https://stat.ethz.ch/R-manual/R-devel/library/datasets/html/mtcars.html).
+The data set used in the analysis comes from [the website](http://groupware.les.inf.puc-rio.br/har).
 
 Packages and options needed for the analysis.
 
@@ -31,6 +31,8 @@ opts_chunk$set(fig.width = 10, fig.height = 7, warning = FALSE, message = FALSE,
 panderOptions("table.split.table", Inf)
 ```
 
+The data is loaded into the environment.
+
 ```{r}
 training.csv <- read.csv("data/pml-training.csv")
 testing.csv <- read.csv("data/pml-testing.csv")
@@ -38,26 +40,36 @@ testing.csv <- read.csv("data/pml-testing.csv")
 
 ## 2. Exploratory Data Analysis
 
-The data set is loaded. Since all the variables are numeric, the `am` variable (transmission type) is recoded to a factor with two levels: *automatic* (originally 0) and *manual* (1).
+Summary of the data: in the training set there are `r dim(training.csv)[1]` observations of `r dim(training.csv)[2]` variables. The number of cases in each of the classes is presented below.
 
 ```{r}
-training.csv %>% dim %>% pander
 training.csv %$% table(classe) %>% pander
 ```
 
-In the Appendix, a correlation matrix plot is presented, giving a glance at the data.
+The data set consists of three groups of variables.
 
-## 3. Feature Selection
+- columns 1 to 7 represent the identification data of the cases (excluded from the analysis),
+- one hundred variables consists mainly of NA's and empty strings (excluded from the analysis),
+- the remaining 53 variables (52 predictors and 1 response) are the input for the model.
+
+As shown below, the second and third group are very distinct when it comes to valid data points.
 
 ```{r}
 training.long <- training.csv %>% tbl_df %>% gather %>% group_by(key) %>%
     summarise(valid = 1 - sum(is.na(value) | value == "") / n())
 
 training.long %$% table(valid) %>% pander
+```
+
+We can see that only 60 variables have full coverage, out of which the first seven (ID variables) are not used in the model.
+
+```{r}
 variables <- training.long %>% filter(valid == 1) %$% key %>% .[8:60]
 ```
 
-## 4. Model Preparation
+## 3. Model Preparation
+
+The data partition is performed. In the training data set, we put aside a validation data set of the size of 30%. This validation data set will be used to assess the out-of-sample accuracy of the model.
 
 ```{r}
 set <- createDataPartition(training.csv$classe, p = 0.7, list = FALSE)
@@ -67,7 +79,9 @@ validation.set <- training.csv[-set, variables]
 testing.set <- testing.csv[, variables[-53]]
 ```
 
-## 5. Model Fitting
+## 4. Model Fitting
+
+In the next step, the model is fit, giving 100% accuracy in the training data set, and 99.4% accuracy in the validation data set.
 
 ```{r}
 fit <- randomForest(classe ~ ., training.set)
@@ -75,20 +89,30 @@ confusionMatrix(predict(fit, training.set), training.set$classe)
 confusionMatrix(predict(fit, validation.set), validation.set$classe)
 ```
 
+The variable importance is also calculated. The plot indicates that the top variables explain most of the model performance.
+
 ```{r}
+varImp(fit) %>% add_rownames %>% arrange(-Overall) %>% head(10) %>% pander
 varImpPlot(fit)
 ```
 
-## 6. Model Tuning
+## 5. Model Tuning
+
+In the last step, only 7 of the most important variables are taken as predictors in the final model. Significant reduction in the number of predictors (7 rather than 52) allows us to keep the out-of-sample error small. The overall model accuracy goes down from 99.4% to 98.5%, the error still being small (1.5%).
 
 ```{r}
-varImp(fit) %>% add_rownames %>% arrange(-Overall) %>% head(10)
-
 variables.kiss <- varImp(fit) %>% add_rownames %>% top_n(7, Overall) %$% rowname %>% c("classe")
 
 fit.kiss <- randomForest(classe ~ ., training.set[, variables.kiss])
 confusionMatrix(predict(fit.kiss, training.set), training.set$classe)
 confusionMatrix(predict(fit.kiss, validation.set), validation.set$classe)
+```
+
+## 6. Results
+
+Both full and simplified models perform equally well on the test data set, yielding 100% accuracy.
+
+```{r}
 testing.pred <- predict(fit.kiss, testing.set)
 testing.pred %>% pander
 testing.pred.kiss <- predict(fit.kiss, testing.set)
@@ -97,7 +121,7 @@ testing.pred.kiss %>% pander
 identical(testing.pred, testing.pred.kiss)
 ```
 
-## 7. Results
+The vector of predicted classes are written down to files and then used in the assignment.
 
 ```{r}
 pml_write_files <- function(x) {
