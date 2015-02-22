@@ -1,0 +1,112 @@
+---
+title: 'Predictive Machine Learning: Project'
+output:
+  html_document:
+    highlight: zenburn
+    theme: spacelab
+    toc: yes
+date: '2015-02-22'
+---
+
+## Executive Summary
+
+A
+
+## 1. Data Set
+
+The data set we are going to use in the analysis (`mtcars`) consists of 32 observations on 11 variables, as explained in [the manual](https://stat.ethz.ch/R-manual/R-devel/library/datasets/html/mtcars.html).
+
+Packages and options needed for the analysis.
+
+```{r, message = FALSE}
+library(caret)
+library(dplyr)
+library(tidyr)
+library(magrittr)
+library(randomForest)
+library(pander)
+library(knitr)
+
+opts_chunk$set(fig.width = 10, fig.height = 7, warning = FALSE, message = FALSE, cache = TRUE)
+panderOptions("table.split.table", Inf)
+```
+
+```{r}
+training.csv <- read.csv("data/pml-training.csv")
+testing.csv <- read.csv("data/pml-testing.csv")
+```
+
+## 2. Exploratory Data Analysis
+
+The data set is loaded. Since all the variables are numeric, the `am` variable (transmission type) is recoded to a factor with two levels: *automatic* (originally 0) and *manual* (1).
+
+```{r}
+training.csv %>% dim %>% pander
+training.csv %$% table(classe) %>% pander
+```
+
+In the Appendix, a correlation matrix plot is presented, giving a glance at the data.
+
+## 3. Feature Selection
+
+```{r}
+training.long <- training.csv %>% tbl_df %>% gather %>% group_by(key) %>%
+    summarise(valid = 1 - sum(is.na(value) | value == "") / n())
+
+training.long %$% table(valid) %>% pander
+variables <- training.long %>% filter(valid == 1) %$% key %>% .[8:60]
+```
+
+## 4. Model Preparation
+
+```{r}
+set <- createDataPartition(training.csv$classe, p = 0.7, list = FALSE)
+
+training.set <- training.csv[set, variables]
+validation.set <- training.csv[-set, variables]
+testing.set <- testing.csv[, variables[-53]]
+```
+
+## 5. Model Fitting
+
+```{r}
+fit <- randomForest(classe ~ ., training.set)
+confusionMatrix(predict(fit, training.set), training.set$classe)
+confusionMatrix(predict(fit, validation.set), validation.set$classe)
+```
+
+```{r}
+varImpPlot(fit)
+```
+
+## 6. Model Tuning
+
+```{r}
+varImp(fit) %>% add_rownames %>% arrange(-Overall) %>% head(10)
+
+variables.kiss <- varImp(fit) %>% add_rownames %>% top_n(7, Overall) %$% rowname %>% c("classe")
+
+fit.kiss <- randomForest(classe ~ ., training.set[, variables.kiss])
+confusionMatrix(predict(fit.kiss, training.set), training.set$classe)
+confusionMatrix(predict(fit.kiss, validation.set), validation.set$classe)
+testing.pred <- predict(fit.kiss, testing.set)
+testing.pred %>% pander
+testing.pred.kiss <- predict(fit.kiss, testing.set)
+testing.pred.kiss %>% pander
+
+identical(testing.pred, testing.pred.kiss)
+```
+
+## 7. Results
+
+```{r}
+pml_write_files <- function(x) {
+    n = length(x)
+    for (i in 1:n) {
+        filename = paste0("data/problem_id_", i, ".txt")
+        write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+    }
+}
+
+pml_write_files(testing.pred.kiss)
+```
